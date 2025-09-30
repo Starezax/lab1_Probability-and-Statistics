@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Work breakdown
 
 -   *Alina Bodnar*:
--   *Name2 Surname2*:
+-   Arsen Botsko:
 -   *Name3 Surname3*:
 
 ## Introduction
@@ -146,7 +146,6 @@ list.files(getwd())
 list.files("4-spam")
 ```
 
-
 ```{r}
 test_path <- "4-spam/test.csv"
 train_path <- "4-spam/train.csv"
@@ -165,8 +164,8 @@ print("Column names:")
 colnames(train)
 ```
 
-
 #Text cleaning:
+
 ```{r}
 # https://stackoverflow.com/questions/27195912/why-does-strsplit-return-a-list
 library(tidyverse)
@@ -185,6 +184,7 @@ test$text_clean <- sapply(test$Message, clean_text)
 ```
 
 #Creating tidy data (Bag of words):
+
 ```{r}
 tidy_train <- train %>%
   unnest_tokens(word, text_clean) %>% # split sentences into individual words
@@ -195,10 +195,6 @@ tidy_test <- test %>%
   filter(!word %in% stop_words)
 ```
 
-
-
-
-
 ## Data visualization
 
 Each time you work with some data, you need to understand it before you
@@ -207,31 +203,28 @@ visualization. Show what are the most common words for negative and
 positive examples as a histogram, word cloud etc. Be creative!
 
 #Basic dataset info:
-```{r}
 
+```{r}
 cat("Dataset info:", "\n")
 cat("Training messages:", nrow(train), "\n")
 cat("Testing messages:", nrow(test), "\n")
 cat("Total words in tidy_train:", nrow(tidy_train), "\n")
 cat("Unique words in vocabulary:", n_distinct(tidy_train$word), "\n")
 
-# Class distribution
 class_dist <- table(train$Category)
 
+ham_count <- class_dist["ham"]
+spam_count <- class_dist["spam"]
+total_count <- nrow(train)  # Define total_count HERE
 
-ham_count <- class_dist["ham"] #normal words
-spam_count <- class_dist["spam"] #spam
-total_count <- nrow(train)
-ham_percent <- round((ham_count / total_messages) * 100, 1)
-spam_percent <- round((spam_count / total_messages) * 100, 1)
+ham_percent <- round((ham_count / total_count) * 100, 1)
+spam_percent <- round((spam_count / total_count) * 100, 1)
 
-
-cat("Distributions with percentages:", "\n")
+cat("\nDistributions with percentages:", "\n")
 cat("Ham:", ham_count, "messages (", ham_percent, "%)", "\n")
 cat("Spam:", spam_count, "messages (", spam_percent, "%)", "\n")
-cat("Total messages:", total_messages)
+cat("Total messages:", total_count, "\n")
 ```
-
 
 ```{r}
 # Class Balance Plot
@@ -266,7 +259,6 @@ cat("Average ham message length:", round(mean(ham_lengths$word_count), 1), "word
 cat("Average spam message length:", round(mean(spam_lengths$word_count), 1), "words", "\n")
 ```
 
-
 ```{r}
 # Message Length Plot
 length_data <- rbind(
@@ -290,7 +282,6 @@ cat("Ham:", round(mean(ham_lengths$word_count <= 50) * 100, 1), "%\n")
 cat("Spam:", round(mean(spam_lengths$word_count <= 50) * 100, 1), "%\n")
 ```
 
-
 ```{r}
 cat("Data Summary", "\n")
 print(paste("We have", total_count, "text messages:"))
@@ -300,8 +291,6 @@ print(paste("Dataset is imbalanced:", ham_percent, "% ham vs", spam_percent, "% 
 print(paste("Spam messages are usually longer than normal messages"))
 ```
 
-
-
 ## Classifier implementation
 
 ```{r}
@@ -309,21 +298,68 @@ naiveBayes <- setRefClass("naiveBayes",
                           
        # here it would be wise to have some vars to store intermediate result
        # frequency dict etc. Though pay attention to bag of words! 
-       fields = list(),
+       fields = list(
+          priors = "data.frame",
+          cond_probs = "data.frame",
+          vocab_size = "numeric",
+          word_freq = "data.frame"
+        ),
        methods = list(
                     # prepare your training data as X - bag of words for each of your
                     # messages and corresponding label for the message encoded as 0 or 1 
                     # (binary classification task)
                     fit = function(X, y)
                     {
-                         # TODO
+                         train_df <- data.frame(text = X, class = y, stringsAsFactors = FALSE)
+                         word_freq <<- train_df %>%
+                           unnest_tokens(word, text) %>%
+                           filter(!word %in% stop_words,
+                                  str_detect(word, "^[a-z]+$"),
+                                  nchar(word) > 1) %>%
+                           count(class, word, sort = TRUE)
+                         
+                         
+                         priors <<- train_df %>%
+                         count(class) %>%
+                         mutate(prior = n / sum(n))
+  
+                         vocab_size <<- word_freq %>% distinct(word) %>% nrow()
+                         
+                         
+                         cond_probs <<- word_freq %>%
+                           group_by(class) %>%
+                           mutate(total_words = sum(n)) %>%
+                           ungroup() %>%
+                           mutate(prob = (n + 1) / (total_words + vocab_size))
                     },
                     
                     # return prediction for a single message 
                     predict = function(message)
                     {
-                         # TODO
-                    },
+                         msg_words <- data.frame(text = message) %>%
+                           unnest_tokens(word, text) %>%
+                           filter(!word %in% stop_words,
+                                  str_detect(word, "^[a-z]+$"),
+                                  nchar(word) > 1)
+                         
+                         scores <- priors
+                         scores$logprob <- log(scores$prior)
+                         
+                     for (i in seq_len(nrow(scores))) {
+                             cls <- scores$class[i]
+                             probs_cls <- cond_probs %>% filter(class == cls)
+                             
+                             for (w in msg_words$word) {
+                               pwc <- probs_cls %>% filter(word == w) %>% pull(prob)
+                               if (length(pwc) == 0) {
+                                 pwc <- 1 / (sum(probs_cls$total_words) + vocab_size)  # smoothing
+                               }
+                               scores$logprob[i] <- scores$logprob[i] + log(pwc)
+                             }
+                           }
+                           
+                           return(scores$class[which.max(scores$logprob)])
+                      },
                     
                     # score you test set so to get the understanding how well you model
                     # works.
@@ -332,12 +368,34 @@ naiveBayes <- setRefClass("naiveBayes",
                     # try how well your model generalizes to real world data! 
                     score = function(X_test, y_test)
                     {
-                         # TODO
+                         preds <- sapply(X_test, function(msg) .self$predict(msg))
+
+                         TP <- sum(preds == "spam" & y_test == "spam")
+                         TN <- sum(preds == "ham" & y_test == "ham")
+                         FP <- sum(preds == "spam" & y_test == "ham")
+                         FN <- sum(preds == "ham" & y_test == "spam")
+                         
+                         accuracy <- (TP + TN) / length(y_test)
+                         precision <- TP / (TP + FP)
+                         recall <- TP / (TP + FN)
+                         f1 <- 2 * precision * recall / (precision + recall)
+                         
+                         cat("Accuracy:", accuracy, "\n")
+                         cat("Precision:", precision, "\n")
+                         cat("Recall:", recall, "\n")
+                         cat("F1 Score:", f1, "\n")
+                         
+                         return(list(preds = preds,
+                                     accuracy = accuracy,
+                                     precision = precision,
+                                     recall = recall,
+                                     f1 = f1))
                     }
 ))
 
 model = naiveBayes()
-model$fit()
+model$fit(X = train$Message, y = train$Category)
+results <- model$score(X_test = test$Message, y_test = test$Category)
 ```
 
 ## Measure effectiveness of your classifier
