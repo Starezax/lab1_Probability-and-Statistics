@@ -141,79 +141,166 @@ library(ggplot2)
         of words from your text document.
 
 ```{r}
+
 list.files(getwd())
-list.files("data/0-authors")
+list.files("4-spam")
 ```
+
 
 ```{r}
 test_path <- "4-spam/test.csv"
 train_path <- "4-spam/train.csv"
 
+train <- read.csv(train_path, stringsAsFactors = FALSE) #text columns stay as normal text
+test <- read.csv(test_path, stringsAsFactors = FALSE)
+
+stop_words <- readLines("stop_words.txt")
+
+print("Data structure:")
+print("Training Data Structure:")
+str(train)
+print("Testing Data Structure:")
+str(test)
+print("Column names:")
+colnames(train)
+```
+
+
+#Text cleaning:
+```{r}
 # https://stackoverflow.com/questions/27195912/why-does-strsplit-return-a-list
-#splitted_stop_words <- strsplit(stop_words, split='\n')
-#splitted_stop_words <- splitted_stop_words[[1]]
-stop_words <- read_file("stop_words.txt")
-splitted_stop_words <- strsplit(stop_words, split='\n')[[1]]
-splitted_stop_words <- tolower(trimws(splitted_stop_words))
-```
-
-```{r}
-install.packages("tidyverse")
-```
-
-```{r}
 library(tidyverse)
 library(tidytext)
 
-# Load data
-train <- read_csv(train_path)
-test  <- read_csv(test_path)
-
-# Function to clean text
-clean_text <- function(x) {
-  x %>%
-    tolower() %>%
-    str_replace_all("[^a-z\\s]", " ") %>%
-    str_replace_all("\\s+", " ") %>%
-    str_trim()
+clean_text <- function(text) {
+  text <- tolower(text)
+  text <- gsub("[^a-z\\s]", " ", text) # keep only letters and spaces
+  text <- gsub("\\s+", " ", text) # removing extra whitespace
+  trimws(text)  #trims spaces from start/end
 }
 
-# Apply cleaning
-train <- train %>%
-  mutate(doc_id = row_number(),
-         text_clean = clean_text(text))
-
-test <- test %>%
-  mutate(doc_id = row_number(),
-         text_clean = clean_text(text))
-
-# Tokenize + remove stop words
-train_tokens <- train %>%
-  unnest_tokens(word, text_clean) %>%
-  filter(!word %in% splitted_stop_words,
-         str_detect(word, "^[a-z]+$"),
-         nchar(word) > 1)
-
-test_tokens <- test %>%
-  unnest_tokens(word, text_clean) %>%
-  filter(!word %in% splitted_stop_words,
-         str_detect(word, "^[a-z]+$"),
-         nchar(word) > 1)
-
-# Bag-of-words
-train_bow <- train_tokens %>%
-  count(doc_id, word, name = "count")
-
-test_bow <- test_tokens %>%
-  count(doc_id, word, name = "count")
-
+# clean messages
+train$text_clean <- sapply(train$Message, clean_text)
+test$text_clean <- sapply(test$Message, clean_text)
 ```
+
+#Creating tidy data (Bag of words):
+```{r}
+tidy_train <- train %>%
+  unnest_tokens(word, text_clean) %>% # split sentences into individual words
+  filter(!word %in% stop_words)  #remove common useless words
+
+tidy_test <- test %>%
+  unnest_tokens(word, text_clean) %>%
+  filter(!word %in% stop_words)
+```
+
+
+
+
+
 ## Data visualization
 
 Each time you work with some data, you need to understand it before you
 start processing it. R has very powerful tools to make nice plots and
 visualization. Show what are the most common words for negative and
 positive examples as a histogram, word cloud etc. Be creative!
+
+#Basic dataset info:
+```{r}
+
+cat("Dataset info:", "\n")
+cat("Training messages:", nrow(train), "\n")
+cat("Testing messages:", nrow(test), "\n")
+cat("Total words in tidy_train:", nrow(tidy_train), "\n")
+cat("Unique words in vocabulary:", n_distinct(tidy_train$word), "\n")
+
+# Class distribution
+class_dist <- table(train$Category)
+
+
+ham_count <- class_dist["ham"] #normal words
+spam_count <- class_dist["spam"] #spam
+total_count <- nrow(train)
+ham_percent <- round((ham_count / total_messages) * 100, 1)
+spam_percent <- round((spam_count / total_messages) * 100, 1)
+
+
+cat("Distributions with percentages:", "\n")
+cat("Ham:", ham_count, "messages (", ham_percent, "%)", "\n")
+cat("Spam:", spam_count, "messages (", spam_percent, "%)", "\n")
+cat("Total messages:", total_messages)
+```
+
+
+```{r}
+# Class Balance Plot
+class_plot <- ggplot(data.frame(
+  type = c("Ham", "Spam"),
+  count = c(ham_count, spam_count)
+), aes(x = type, y = count, fill = type)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Number of Ham vs Spam Messages",
+       x = "Message Type",
+       y = "Count") +
+  scale_fill_manual(values = c("blue", "red"))
+
+print(class_plot)
+```
+
+```{r}
+# Message Length Calculation
+
+# Count words in each message
+ham_lengths <- tidy_train %>% 
+  filter(Category == "ham") %>%
+  group_by(Message) %>%
+  summarise(word_count = n())
+
+spam_lengths <- tidy_train %>% 
+  filter(Category == "spam") %>%
+  group_by(Message) %>%
+  summarise(word_count = n())
+
+cat("Average ham message length:", round(mean(ham_lengths$word_count), 1), "words", "\n")
+cat("Average spam message length:", round(mean(spam_lengths$word_count), 1), "words", "\n")
+```
+
+
+```{r}
+# Message Length Plot
+length_data <- rbind(
+  data.frame(Category = "ham", word_count = ham_lengths$word_count),
+  data.frame(Category = "spam", word_count = spam_lengths$word_count)
+)
+
+length_plot <- ggplot(length_data, aes(x = Category, y = word_count, fill = Category)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim = c(0, 50)) +
+  scale_fill_manual(values = c("ham" = "blue", "spam" = "red")) +
+  ggtitle("Message Length: Ham vs Spam") +
+  xlab("Message Type") +
+  ylab("Number of Words")
+
+print(length_plot)
+
+
+cat("Messages with 50 words or less:\n")
+cat("Ham:", round(mean(ham_lengths$word_count <= 50) * 100, 1), "%\n")
+cat("Spam:", round(mean(spam_lengths$word_count <= 50) * 100, 1), "%\n")
+```
+
+
+```{r}
+cat("Data Summary", "\n")
+print(paste("We have", total_count, "text messages:"))
+print(paste("-", ham_count, "are normal messages (ham)"))
+print(paste("-", spam_count, "are spam messages"))
+print(paste("Dataset is imbalanced:", ham_percent, "% ham vs", spam_percent, "% spam"))
+print(paste("Spam messages are usually longer than normal messages"))
+```
+
+
 
 ## Classifier implementation
 
