@@ -15,8 +15,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Work breakdown
 
 -   *Alina Bodnar*:
--   Arsen Botsko:
--   *Name3 Surname3*:
+-   *Arsen Botsko*:
+-   *Oleh Hutsuliak*:
 
 ## Introduction
 
@@ -295,19 +295,14 @@ print(paste("Spam messages are usually longer than normal messages"))
 
 ```{r}
 naiveBayes <- setRefClass("naiveBayes",
-                          
-       # here it would be wise to have some vars to store intermediate result
-       # frequency dict etc. Though pay attention to bag of words! 
        fields = list(
           priors = "data.frame",
           cond_probs = "data.frame",
           vocab_size = "numeric",
-          word_freq = "data.frame"
+          word_freq = "data.frame",
+          last_results = "list"
         ),
        methods = list(
-                    # prepare your training data as X - bag of words for each of your
-                    # messages and corresponding label for the message encoded as 0 or 1 
-                    # (binary classification task)
                     fit = function(X, y)
                     {
                          train_df <- data.frame(text = X, class = y, stringsAsFactors = FALSE)
@@ -318,13 +313,11 @@ naiveBayes <- setRefClass("naiveBayes",
                                   nchar(word) > 1) %>%
                            count(class, word, sort = TRUE)
                          
-                         
                          priors <<- train_df %>%
                          count(class) %>%
                          mutate(prior = n / sum(n))
   
                          vocab_size <<- word_freq %>% distinct(word) %>% nrow()
-                         
                          
                          cond_probs <<- word_freq %>%
                            group_by(class) %>%
@@ -333,7 +326,6 @@ naiveBayes <- setRefClass("naiveBayes",
                            mutate(prob = (n + 1) / (total_words + vocab_size))
                     },
                     
-                    # return prediction for a single message 
                     predict = function(message)
                     {
                          msg_words <- data.frame(text = message) %>%
@@ -345,14 +337,14 @@ naiveBayes <- setRefClass("naiveBayes",
                          scores <- priors
                          scores$logprob <- log(scores$prior)
                          
-                     for (i in seq_len(nrow(scores))) {
+                         for (i in seq_len(nrow(scores))) {
                              cls <- scores$class[i]
                              probs_cls <- cond_probs %>% filter(class == cls)
                              
                              for (w in msg_words$word) {
                                pwc <- probs_cls %>% filter(word == w) %>% pull(prob)
                                if (length(pwc) == 0) {
-                                 pwc <- 1 / (sum(probs_cls$total_words) + vocab_size)  # smoothing
+                                 pwc <- 1 / (unique(probs_cls$total_words) + vocab_size)
                                }
                                scores$logprob[i] <- scores$logprob[i] + log(pwc)
                              }
@@ -361,11 +353,6 @@ naiveBayes <- setRefClass("naiveBayes",
                            return(scores$class[which.max(scores$logprob)])
                       },
                     
-                    # score you test set so to get the understanding how well you model
-                    # works.
-                    # look at f1 score or precision and recall
-                    # visualize them 
-                    # try how well your model generalizes to real world data! 
                     score = function(X_test, y_test)
                     {
                          preds <- sapply(X_test, function(msg) .self$predict(msg))
@@ -376,9 +363,20 @@ naiveBayes <- setRefClass("naiveBayes",
                          FN <- sum(preds == "ham" & y_test == "spam")
                          
                          accuracy <- (TP + TN) / length(y_test)
-                         precision <- TP / (TP + FP)
-                         recall <- TP / (TP + FN)
-                         f1 <- 2 * precision * recall / (precision + recall)
+                         precision <- if ((TP + FP)==0) NA else TP / (TP + FP)
+                         recall <- if ((TP + FN)==0) NA else TP / (TP + FN)
+                         f1 <- if (is.na(precision) | is.na(recall) | (precision + recall)==0) NA else 2 * precision * recall / (precision + recall)
+                         
+                         metrics_df <- data.frame(metric = c("Accuracy","Precision","Recall","F1"),
+                                                  value  = c(accuracy, precision, recall, f1),
+                                                  stringsAsFactors = FALSE)
+                         
+                         conf_mat <- table(Predicted = preds, Actual = y_test)
+                         
+                         last_results <<- list(preds = preds,
+                                               metrics = metrics_df,
+                                               confusion = conf_mat,
+                                               counts = list(TP = TP, TN = TN, FP = FP, FN = FN))
                          
                          cat("Accuracy:", accuracy, "\n")
                          cat("Precision:", precision, "\n")
@@ -393,8 +391,8 @@ naiveBayes <- setRefClass("naiveBayes",
                     }
 ))
 
-model = naiveBayes()
-model$fit(X = train$Message, y = train$Category)
+model = naiveBayes() 
+model$fit(X = train$text_clean, y = train$Category) 
 results <- model$score(X_test = test$Message, y_test = test$Category)
 ```
 
@@ -441,7 +439,68 @@ results <- model$score(X_test = test$Message, y_test = test$Category)
 
 -   Visualize them.
 
+Building confusion matrix.
+```{r}
+conf_mat <- model$last_results$confusion
+print(as.data.frame.matrix(conf_mat))
+```
+
+Plot confusion matrix as heatmap
+```{r}
+cm_df <- as.data.frame(conf_mat)
+cm_df$Predicted <- factor(cm_df$Predicted, levels = rownames(conf_mat))
+cm_df$Actual    <- factor(cm_df$Actual, levels = colnames(conf_mat))
+
+ggplot(cm_df, aes(x = Actual, y = Predicted, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), size = 5) +
+  scale_fill_continuous(name = "Count") +
+  scale_y_discrete(limits = rev(levels(cm_df$Predicted))) +
+  labs(title = "Confusion Matrix", x = "Actual", y = "Predicted") +
+  theme_minimal(base_size = 14)
+```
+
+Accuracy/precision/recall/f1
+```{r}
+metrics_df <- model$last_results$metrics
+print(metrics_df)
+```
+
+Bar plot of the metrics
+```{r}
+metrics_plot_df <- metrics_df %>% mutate(metric = factor(metric, levels = c("Accuracy","Precision","Recall","F1")))
+ggplot(metrics_plot_df, aes(x = metric, y = value)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = signif(value, 3)), vjust = -0.5) +
+  ylim(0, 1) +
+  labs(title = "Evaluation Metrics", y = "Value (0-1)", x = "") +
+  theme_minimal(base_size = 12)
+```
+
 -   Show failure cases.
+
+```{r}
+preds <- model$last_results$preds
+eval_df <- data.frame(Actual = test$Category, Predicted = preds, Message = test$Message, stringsAsFactors = FALSE)
+
+false_positives <- eval_df %>% filter(Predicted == "spam" & Actual == "ham")
+false_negatives <- eval_df %>% filter(Predicted == "ham"  & Actual == "spam")
+
+fps <- false_positives %>%
+  mutate(case_type = "False Positive",
+         short_msg = ifelse(nchar(Message) > 200, paste0(substr(Message,1,197),"..."), Message)) %>%
+  select(case_type, Actual, Predicted, short_msg)
+
+fns <- false_negatives %>%
+  mutate(case_type = "False Negative",
+         short_msg = ifelse(nchar(Message) > 200, paste0(substr(Message,1,197),"..."), Message)) %>%
+  select(case_type, Actual, Predicted, short_msg)
+
+failures_combined <- bind_rows(fns, fps)
+
+cat("False Negatives:", nrow(fns), "  False Positives:", nrow(fps), "\n\n")
+print(head(failures_combined, 20), row.names = FALSE)
+```
 
 ## Conclusions
 
