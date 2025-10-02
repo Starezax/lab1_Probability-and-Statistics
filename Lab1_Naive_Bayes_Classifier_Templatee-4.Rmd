@@ -16,7 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 -   *Alina Bodnar*: Data cleaning, text preprocessing, data analysis and basic visualizations
 -   *Arsen Botsko*:
--   *Oleh Hutsuliak*:
+-   *Oleh Hutsuliak*: Score calculating, plotted confusion matrix, metrics and showed failure cases
 
 ## Introduction
 
