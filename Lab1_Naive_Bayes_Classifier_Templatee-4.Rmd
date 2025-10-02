@@ -15,7 +15,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Work breakdown
 
 -   *Alina Bodnar*: Data cleaning, text preprocessing, data analysis and basic visualizations
--   *Arsen Botsko*:
+-   *Arsen Botsko*: Naive Bayes classifier (calculated prior and conditional probabilities, built prediction function, applied model to test data)
 -   *Oleh Hutsuliak*: Score calculating, plotted confusion matrix, metrics and showed failure cases
 
 ## Introduction
