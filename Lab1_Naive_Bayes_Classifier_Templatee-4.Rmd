@@ -153,7 +153,7 @@ train_path <- "4-spam/train.csv"
 train <- read.csv(train_path, stringsAsFactors = FALSE) #text columns stay as normal text
 test <- read.csv(test_path, stringsAsFactors = FALSE)
 
-stop_words <- readLines("stop_words.txt")
+custom_stop_words <- readLines("stop_words.txt")
 
 print("Data structure:")
 print("Training Data Structure:")
@@ -188,11 +188,11 @@ test$text_clean <- sapply(test$Message, clean_text)
 ```{r}
 tidy_train <- train %>%
   unnest_tokens(word, text_clean) %>% # split sentences into individual words
-  filter(!word %in% stop_words)  #remove common useless words
+  filter(!word %in% custom_stop_words)  #remove common useless words
 
 tidy_test <- test %>%
   unnest_tokens(word, text_clean) %>%
-  filter(!word %in% stop_words)
+  filter(!word %in% custom_stop_words)
 ```
 
 ## Data visualization
@@ -308,7 +308,7 @@ naiveBayes <- setRefClass("naiveBayes",
                          train_df <- data.frame(text = X, class = y, stringsAsFactors = FALSE)
                          word_freq <<- train_df %>%
                            unnest_tokens(word, text) %>%
-                           filter(!word %in% stop_words,
+                           filter(!word %in% custom_stop_words,
                                   str_detect(word, "^[a-z]+$"),
                                   nchar(word) > 1) %>%
                            count(class, word, sort = TRUE)
@@ -330,7 +330,7 @@ naiveBayes <- setRefClass("naiveBayes",
                     {
                          msg_words <- data.frame(text = message) %>%
                            unnest_tokens(word, text) %>%
-                           filter(!word %in% stop_words,
+                           filter(!word %in% custom_stop_words,
                                   str_detect(word, "^[a-z]+$"),
                                   nchar(word) > 1)
                          
@@ -514,3 +514,15 @@ below.
     nature of your data etc.
 -   Explain why accuracy is not a good choice for the base metrics for
     classification tasks. Why F1 score is always preferable?
+
+In this lab our task was to build and test a Native Bayes’ classifier for detecting spam messages. Our work was based on Bayes’ theorem, where the probability of a message being spam or ham (means normal message) is calculated using both prior probabilities and conditional probabilities. Prior probabilities mean how frequent each class is overal and conditional probabilities mean how frequent each word inside the class is. One of the key assumptions of Naive Bayes’ is that words appear independently from each other given the class. And even though this assumption is not completely true in real language, it makes the model simple and effective for text classification tasks.
+In real language words are not independent. For example, a word like ”New”, is more likely to be together with York rather than banana. So there are strong dependencies between words.
+Naive Bayes’ assumption ignores these dependencies and pretends that each word appears independently from the others when you know the class (spam/ham).
+
+Before training the classifier, we explored and cleaned the dataset. The data was imbalanced, with about 86% ham messages and 14% spam messages. We also found that spam messages were generally longer on average than ham. After preprocessing, we created a bag-of-words representation and used it to estimate the model parameters. This process gave us the prior probabilities of spam and ham, and the likelihood of each word occurring in either class.
+
+When we evaluated the model on the test set, it achieved these results: 97.2% accuracy, 85.5% precision, 93.7% recall, and an F1 score of 0.89. These numbers show that the classifier was able to correctly identify the majority of spam messages and also kept false positives relatively low. But there were still 25 cases where a ham message was marked as spam, and 10 cases where spam was mistaken for ham. This shows that the right choice for spam filters depends on whether it’s more important to avoid missing spam or to minimise false alarms for regular messages.
+
+Naive Bayes’ is effective because it is simple, fast, and reliable even with very large vocabularies. It works well as a baseline model for text classification and can be trained quickly. But the assumption that words occur independently is a limitation, because it prevents the model from fully capturing the structure of language. This can worsen performance when working with phrases, slang, or context that require deeper understanding. Another limitation is that accuracy can be misleading with imbalanced datasets. For example, a model that always predicts 'ham' would achieve a high accuracy but would not be useful. Metrics such as precision, recall, and the F1 score provide a more balanced and realistic view of the classifier’s performance.
+
+Overall, this lab showed how Naive Bayes’ can be used to build a working spam filter with a few steps of data preprocessing and probability estimation. It also showed that it is important to evaluate models with different metrics and not just accuracy, and to consider the balance between catching spam and avoiding false alarms.
