@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Work breakdown
 
--   *Alina Bodnar*:
+-   *Alina Bodnar*: Data cleaning, text preprocessing, data analysis and basic visualizations
 -   *Arsen Botsko*:
 -   *Oleh Hutsuliak*:
 
